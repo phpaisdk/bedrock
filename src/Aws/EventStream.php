@@ -185,6 +185,9 @@ final class EventStream
     private static function encodeStringHeader(string $name, string $value): string
     {
         $nb = strlen($name);
+        if ($nb > 255) {
+            throw new \InvalidArgumentException('AWS event-stream header names cannot exceed 255 bytes.');
+        }
 
         return chr($nb) . $name . chr(7) . pack('n', strlen($value)) . $value;
     }
