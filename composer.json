@@ -1,0 +1,64 @@
+{
+    "name": "aisdk/bedrock",
+    "description": "Official Amazon Bedrock provider for the PHP AI SDK.",
+    "license": "MIT",
+    "keywords": [
+        "ai",
+        "aisdk",
+        "aws",
+        "bedrock",
+        "claude",
+        "llm"
+    ],
+    "homepage": "https://github.com/phpaisdk/bedrock",
+    "support": {
+        "issues": "https://github.com/phpaisdk/bedrock/issues",
+        "source": "https://github.com/phpaisdk/bedrock"
+    },
+    "require": {
+        "php": "^8.3",
+        "aisdk/core": "^0.4"
+    },
+    "require-dev": {
+        "aws/aws-sdk-php": "^3.300",
+        "laravel/pint": "^1.18",
+        "nyholm/psr7": "^1.8",
+        "pestphp/pest": "^3.0 || ^4.0",
+        "phpstan/phpstan": "^2.0",
+        "rector/rector": "^2.0"
+    },
+    "suggest": {
+        "aws/aws-sdk-php": "Enables SigV4 signing with the full AWS credential chain (shared config/profiles, SSO, IMDS, ECS, assume-role, web-identity). Not required when using a Bedrock API key or explicit static access keys."
+    },
+    "autoload": {
+        "psr-4": {
+            "AiSdk\\": "src/Root/",
+            "AiSdk\\Bedrock\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "AiSdk\\Bedrock\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "lint": "vendor/bin/pint --test",
+        "format": "vendor/bin/pint",
+        "analyze": "vendor/bin/phpstan analyze --memory-limit=512M",
+        "refactor:dry": "vendor/bin/rector process --dry-run",
+        "refactor": "vendor/bin/rector process",
+        "test": "pest",
+        "test:all": [
+            "@lint",
+            "@analyze",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    }
+}
