@@ -1,6 +1,6 @@
 # aisdk/bedrock
 
-Official Amazon Bedrock provider for the framework-agnostic PHP AI SDK. It uses native **Converse** APIs for text and **InvokeModel** for image generation, with SigV4 signing built in.
+Official Amazon Bedrock provider for the framework-agnostic PHP AI SDK. Anthropic models use native **InvokeModel** by default, other text models use **Converse**, and images use **InvokeModel**. Bedrock's OpenAI-compatible Chat Completions and Responses surfaces are also available.
 
 ## Installation
 
@@ -23,6 +23,19 @@ echo $result->text;
 ```
 
 Bedrock model IDs pass through unchanged and do not need to be registered. This package does not ship a model inventory; the SDK performs internal adapter validation before Bedrock validates support for the selected model in the current account and region.
+
+## API surfaces
+
+Anthropic model IDs automatically use the native Messages format through `InvokeModel`. You can override that choice per request:
+
+```php
+$result = Generate::text('Explain this code.')
+    ->model(Bedrock::model('anthropic.claude-3-5-haiku-20241022-v1:0'))
+    ->providerOptions('amazon-bedrock', ['api' => 'converse'])
+    ->run();
+```
+
+Supported values are `converse`, `invoke`, `mantle_chat`, and `mantle_responses`. Mantle selections automatically use the regional `bedrock-mantle.{region}.api.aws/v1` endpoint unless you configured a custom base URL. You can also set `api` in `Bedrock::create()` to choose one surface for that provider instance.
 
 ## Streaming
 

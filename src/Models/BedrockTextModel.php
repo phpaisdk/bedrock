@@ -6,15 +6,25 @@ namespace AiSdk\Bedrock\Models;
 
 use AiSdk\Bedrock\Auth\BedrockAuth;
 use AiSdk\Bedrock\Aws\EventStream;
+use AiSdk\Bedrock\BedrockApi;
 use AiSdk\Bedrock\BedrockOptions;
-use AiSdk\Bedrock\Converters\ConvertsMessages;
 use AiSdk\Bedrock\Converters\ConvertsUsage;
 use AiSdk\Bedrock\Converters\MapsFinishReasons;
+use AiSdk\Bedrock\Parsers\AnthropicMessagesStreamParser;
+use AiSdk\Bedrock\Support\AnthropicMessagesCommandBuilder;
+use AiSdk\Bedrock\Support\ConverseCommandBuilder;
 use AiSdk\Capability;
 use AiSdk\Contracts\BaseModel;
 use AiSdk\Contracts\TextModelInterface;
+use AiSdk\Exceptions\APIConnectionException;
 use AiSdk\FinishReason;
 use AiSdk\Generate;
+use AiSdk\OpenAICompatible\ChatRequestBuilder;
+use AiSdk\OpenAICompatible\ChatResponseParser;
+use AiSdk\OpenAICompatible\ChatStreamParser;
+use AiSdk\OpenAICompatible\ResponsesRequestBuilder;
+use AiSdk\OpenAICompatible\ResponsesResponseParser;
+use AiSdk\OpenAICompatible\ResponsesStreamParser;
 use AiSdk\Requests\TextModelRequest;
 use AiSdk\Responses\Parts\ReasoningPart;
 use AiSdk\Responses\Parts\TextPart;
@@ -28,9 +38,12 @@ use AiSdk\Support\Json;
 use AiSdk\Support\Sdk;
 use AiSdk\Support\Usage;
 use AiSdk\Utils\Errors\HttpErrorNormalizer;
+use AiSdk\Utils\Stream\SseParser;
 use AiSdk\Utils\Support\Url;
 use Generator;
 use GuzzleHttp\ClientInterface as GuzzleClientInterface;
+use GuzzleHttp\Exception\TransferException;
+use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -40,8 +53,11 @@ final class BedrockTextModel extends BaseModel implements TextModelInterface
         Capability::TextGeneration,
         Capability::Streaming,
         Capability::Reasoning,
+        Capability::ToolCalling,
+        Capability::StructuredOutput,
         Capability::TextInput,
         Capability::ImageInput,
+        Capability::FileInput,
     ];
 
     public function __construct(
@@ -63,78 +79,128 @@ final class BedrockTextModel extends BaseModel implements TextModelInterface
     {
         $this->ensureTextRequestSupported($request, self::ADAPTER_CAPABILITIES);
 
-        $command = $this->buildCommand($request);
-        $url = $this->endpoint(false);
+        $api = $this->resolveApi($request);
         $sdk = $this->sdk();
+        $provider = $this->provider();
+
+        if ($api === BedrockApi::MantleChat || $api === BedrockApi::MantleResponses) {
+            $body = $api === BedrockApi::MantleChat
+                ? ChatRequestBuilder::build($this->modelId, $provider, $request, stream: false)
+                : ResponsesRequestBuilder::build($this->modelId, $provider, $request, stream: false);
+            unset($body['api']);
+
+            $httpRequest = $this->jsonRequest($sdk, $this->endpoint($api, false), $body, 'application/json');
+            $response = $this->send($sdk, $this->authorize($httpRequest, $sdk), false);
+            $this->ensureSuccess($response);
+            $payload = Json::decode((string) $response->getBody(), $provider);
+
+            return $api === BedrockApi::MantleChat
+                ? ChatResponseParser::parse($payload, $provider)
+                : ResponsesResponseParser::parse($payload, $provider);
+        }
+
+        $command = $this->buildCommand($api, $request);
+        $url = $this->endpoint($api, false);
 
         $httpRequest = $this->jsonRequest($sdk, $url, $command, 'application/json');
         $response = $this->send($sdk, $this->authorize($httpRequest, $sdk), false);
         $this->ensureSuccess($response);
 
-        /** @var array<string, mixed> $payload */
-        $payload = Json::decode((string) $response->getBody(), $this->provider());
+        $payload = Json::decode((string) $response->getBody(), $provider);
 
-        return $this->mapResponse($payload);
+        return match ($api) {
+            BedrockApi::Converse => $this->mapConverseResponse($payload),
+            BedrockApi::Invoke => $this->mapAnthropicResponse($payload),
+        };
     }
 
     public function stream(TextModelRequest $request): Generator
     {
         $this->ensureTextRequestSupported($request, self::ADAPTER_CAPABILITIES, streaming: true);
 
-        $command = $this->buildCommand($request);
-        $url = $this->endpoint(true);
+        $api = $this->resolveApi($request);
         $sdk = $this->sdk();
+        $provider = $this->provider();
 
-        $httpRequest = $this->jsonRequest($sdk, $url, $command, 'application/vnd.amazon.eventstream');
+        if ($api === BedrockApi::MantleChat) {
+            $body = ChatRequestBuilder::build($this->modelId, $provider, $request, stream: true);
+            unset($body['api']);
+            $response = $this->sendMantleStream($sdk, $api, $body);
+
+            yield from ChatStreamParser::parse(
+                SseParser::parseStream($response->getBody()),
+                $provider,
+            );
+
+            return;
+        }
+
+        if ($api === BedrockApi::MantleResponses) {
+            $body = ResponsesRequestBuilder::build($this->modelId, $provider, $request, stream: true);
+            unset($body['api']);
+            $response = $this->sendMantleStream($sdk, $api, $body);
+
+            yield from ResponsesStreamParser::parse(
+                SseParser::parseStream($response->getBody()),
+                $provider,
+            );
+
+            return;
+        }
+
+        $command = $this->buildCommand($api, $request);
+        $url = $this->endpoint($api, true);
+
+        $accept = 'application/vnd.amazon.eventstream';
+
+        $httpRequest = $this->jsonRequest($sdk, $url, $command, $accept);
         $response = $this->send($sdk, $this->authorize($httpRequest, $sdk), true);
         $this->ensureSuccess($response);
 
-        yield from $this->mapStreamEvents($response->getBody());
+        if ($api === BedrockApi::Converse) {
+            yield from $this->mapConverseStream($response->getBody());
+
+            return;
+        }
+
+        yield from $this->mapAnthropicStream($response->getBody());
+    }
+
+    private function resolveApi(TextModelRequest $request): BedrockApi
+    {
+        $override = $request->providerOptionsFor($this->provider())['api'] ?? null;
+        if ($override !== null) {
+            return BedrockApi::resolve($override);
+        }
+
+        // Anthropic models default to the native Invoke (Messages) path so the
+        // provider-specific features (prompt caching, anthropic_beta,
+        // structured output_config) are reachable. Everything else uses
+        // Converse; mantle surfaces require an explicit api selection.
+        if ($this->options->apiConfigured) {
+            return $this->options->api;
+        }
+
+        if (str_contains($this->modelId, 'anthropic.')) {
+            return BedrockApi::Invoke;
+        }
+
+        return $this->options->api;
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function buildCommand(TextModelRequest $request): array
+    private function buildCommand(BedrockApi $api, TextModelRequest $request): array
     {
         $opts = $request->providerOptionsFor($this->provider());
-        $converted = ConvertsMessages::toConverseMessages($request->messages, $request->system);
+        unset($opts['api']);
 
-        $temperature = max(0.0, min(1.0, $request->temperature));
-
-        $inference = ['maxTokens' => $request->maxTokens];
-        if ($request->reasoning === null) {
-            $inference['temperature'] = $temperature;
-        }
-        if ($request->topP !== null && $request->reasoning === null) {
-            $inference['topP'] = $request->topP;
-        }
-
-        $command = [
-            'system' => $converted['system'],
-            'messages' => $converted['messages'],
-            'inferenceConfig' => $inference,
-        ];
-
-        if ($request->reasoning !== null) {
-            $thinking = $request->reasoning->budgetTokens !== null
-                ? ['type' => 'enabled', 'budget_tokens' => $request->reasoning->budgetTokens]
-                : ['type' => 'adaptive'];
-            $additional = ['thinking' => $thinking];
-            if ($request->reasoning->effort !== null) {
-                $additional['output_config'] = ['effort' => $request->reasoning->effort];
-            }
-            $command['additionalModelRequestFields'] = $additional;
-        }
-
-        $raw = $opts['raw'] ?? null;
-        unset($opts['raw']);
-        $command = array_replace($command, $opts);
-        if (is_array($raw)) {
-            $command = array_replace($command, $raw);
-        }
-
-        return $command;
+        return match ($api) {
+            BedrockApi::Converse => ConverseCommandBuilder::build($this->modelId, $request, $opts),
+            BedrockApi::Invoke => AnthropicMessagesCommandBuilder::build($request, $opts),
+            BedrockApi::MantleChat, BedrockApi::MantleResponses => $opts,
+        };
     }
 
     /**
@@ -148,11 +214,24 @@ final class BedrockTextModel extends BaseModel implements TextModelInterface
             ->withHeader('Accept', $accept);
     }
 
-    private function endpoint(bool $stream): string
+    private function endpoint(BedrockApi $api, bool $stream): string
     {
-        $suffix = $stream ? 'converse-stream' : 'converse';
+        $baseUrl = $this->options->baseUrlConfigured
+            ? $this->options->baseUrl
+            : BedrockOptions::defaultUrl($this->options->region, $api);
 
-        return Url::joinPath($this->options->baseUrl, '/model/' . rawurlencode($this->modelId) . '/' . $suffix);
+        return match ($api) {
+            BedrockApi::Converse => Url::joinPath(
+                $baseUrl,
+                '/model/' . rawurlencode($this->modelId) . '/' . ($stream ? 'converse-stream' : 'converse'),
+            ),
+            BedrockApi::Invoke => Url::joinPath(
+                $baseUrl,
+                '/model/' . rawurlencode($this->modelId) . '/' . ($stream ? 'invoke-with-response-stream' : 'invoke'),
+            ),
+            BedrockApi::MantleChat => Url::joinPath($baseUrl, '/chat/completions'),
+            BedrockApi::MantleResponses => Url::joinPath($baseUrl, '/responses'),
+        };
     }
 
     private function sdk(): Sdk
@@ -189,52 +268,115 @@ final class BedrockTextModel extends BaseModel implements TextModelInterface
         );
     }
 
+    private function send(Sdk $sdk, RequestInterface $request, bool $stream): ResponseInterface
+    {
+        try {
+            if ($stream && $sdk->httpClient instanceof GuzzleClientInterface) {
+                return $sdk->httpClient->send($request, [
+                    'allow_redirects' => false,
+                    'stream' => true,
+                ]);
+            }
+
+            return $sdk->httpClient->sendRequest($request);
+        } catch (ClientExceptionInterface|TransferException $e) {
+            throw new APIConnectionException(
+                message: 'Bedrock transport error: ' . $e->getMessage(),
+                context: ['provider' => $this->provider(), 'modelId' => $this->modelId, 'url' => (string) $request->getUri()],
+                previous: $e,
+            );
+        }
+    }
+
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function mapResponse(array $payload): TextModelResponse
+    private function mapConverseResponse(array $payload): TextModelResponse
     {
-        $message = $payload['output']['message'] ?? null;
-        $parts = [];
+        $text = '';
+        $reasoning = '';
 
-        if (is_array($message) && isset($message['content']) && is_array($message['content'])) {
-            foreach ($message['content'] as $part) {
-                if (! is_array($part)) {
-                    continue;
-                }
-                if (isset($part['text']) && is_string($part['text'])) {
-                    $parts[] = new TextPart($part['text']);
-                }
-                if (isset($part['reasoningContent']['reasoningText']['text'])) {
-                    $parts[] = new ReasoningPart((string) $part['reasoningContent']['reasoningText']['text']);
-                }
+        $message = $payload['output']['message'] ?? $payload['message'] ?? null;
+        foreach (($message['content'] ?? []) as $block) {
+            if (! is_array($block)) {
+                continue;
             }
+            if (isset($block['text']) && is_string($block['text'])) {
+                $text .= $block['text'];
+            }
+            $reasoningText = $block['reasoningContent']['reasoningText']['text']
+                ?? $block['reasoningContent']['text']
+                ?? null;
+            if (is_string($reasoningText)) {
+                $reasoning .= $reasoningText;
+            }
+        }
+
+        $parts = [];
+        if ($reasoning !== '') {
+            $parts[] = new ReasoningPart($reasoning);
+        }
+        if ($text !== '') {
+            $parts[] = new TextPart($text);
         }
 
         $usage = isset($payload['usage']) && is_array($payload['usage'])
             ? ConvertsUsage::fromBedrock($payload['usage'])
             : Usage::empty();
 
-        $stopReason = isset($payload['stopReason']) ? (string) $payload['stopReason'] : null;
+        return new TextModelResponse(
+            parts: $parts,
+            finishReason: MapsFinishReasons::fromBedrock((string) ($payload['stopReason'] ?? '')),
+            usage: $usage,
+            rawResponse: $payload,
+            providerMetadata: [($this->provider()) => ['model' => $payload['model'] ?? $this->modelId]],
+        );
+    }
 
-        $meta = [];
-        if (isset($payload['usage']) && is_array($payload['usage'])) {
-            $meta['usage'] = $payload['usage'];
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function mapAnthropicResponse(array $payload): TextModelResponse
+    {
+        $text = '';
+        $reasoning = '';
+        foreach (($payload['content'] ?? []) as $block) {
+            if (! is_array($block)) {
+                continue;
+            }
+            if (isset($block['type']) && $block['type'] === 'text' && is_string($block['text'])) {
+                $text .= $block['text'];
+            }
+            if (isset($block['type']) && $block['type'] === 'thinking' && is_string($block['thinking'] ?? null)) {
+                $reasoning .= $block['thinking'];
+            }
         }
+
+        $parts = [];
+        if ($reasoning !== '') {
+            $parts[] = new ReasoningPart($reasoning);
+        }
+        if ($text !== '') {
+            $parts[] = new TextPart($text);
+        }
+
+        $usage = isset($payload['usage']) && is_array($payload['usage'])
+            ? ConvertsUsage::fromAnthropic($payload['usage'])
+            : Usage::empty();
 
         return new TextModelResponse(
             parts: $parts,
-            finishReason: MapsFinishReasons::fromBedrock($stopReason),
+            finishReason: MapsFinishReasons::fromAnthropic($payload['stop_reason'] ?? null),
             usage: $usage,
             rawResponse: $payload,
-            providerMetadata: $meta !== [] ? [$this->provider() => $meta] : [],
+            providerMetadata: [($this->provider()) => ['model' => $payload['model'] ?? $this->modelId]],
         );
     }
 
     /**
      * @return Generator<int, StreamPart>
      */
-    private function mapStreamEvents(\Psr\Http\Message\StreamInterface $raw): Generator
+    private function mapConverseStream(\Psr\Http\Message\StreamInterface $raw): Generator
     {
         $usage = Usage::empty();
         $finishReason = FinishReason::Unknown;
@@ -276,16 +418,40 @@ final class BedrockTextModel extends BaseModel implements TextModelInterface
         yield new FinishPart($finishReason, $usage);
     }
 
-    private function send(Sdk $sdk, RequestInterface $request, bool $stream): ResponseInterface
+    /**
+     * @return Generator<int, StreamPart>
+     */
+    private function mapAnthropicStream(\Psr\Http\Message\StreamInterface $raw): Generator
     {
-        if ($sdk->httpClient instanceof GuzzleClientInterface) {
-            return $sdk->httpClient->send($request, [
-                'allow_redirects' => false,
-                'stream' => $stream,
-            ]);
-        }
-
-        return $sdk->httpClient->sendRequest($request);
+        yield from AnthropicMessagesStreamParser::parse($this->anthropicEvents($raw));
     }
 
+    /**
+     * @param  array<string, mixed>  $body
+     */
+    private function sendMantleStream(Sdk $sdk, BedrockApi $api, array $body): ResponseInterface
+    {
+        $request = $this->jsonRequest($sdk, $this->endpoint($api, true), $body, 'text/event-stream');
+        $response = $this->send($sdk, $this->authorize($request, $sdk), true);
+        $this->ensureSuccess($response);
+
+        return $response;
+    }
+
+    /** @return Generator<int, array<string, mixed>> */
+    private function anthropicEvents(\Psr\Http\Message\StreamInterface $raw): Generator
+    {
+        foreach (EventStream::decodeStreamChunks($raw) as $event) {
+            $envelope = json_decode($event['data'], true);
+            if (! is_array($envelope) || ! is_string($envelope['bytes'] ?? null)) {
+                continue;
+            }
+
+            $decoded = base64_decode($envelope['bytes'], true);
+            $payload = is_string($decoded) ? json_decode($decoded, true) : null;
+            if (is_array($payload)) {
+                yield $payload;
+            }
+        }
+    }
 }

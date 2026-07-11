@@ -8,6 +8,7 @@ use AiSdk\Bedrock\Auth\BedrockAuth;
 use AiSdk\Bedrock\BedrockOptions;
 use AiSdk\Contracts\BaseModel;
 use AiSdk\Contracts\ImageModelInterface;
+use AiSdk\Exceptions\APIConnectionException;
 use AiSdk\Exceptions\InvalidArgumentException;
 use AiSdk\Exceptions\InvalidResponseException;
 use AiSdk\Generate;
@@ -19,6 +20,8 @@ use AiSdk\Support\Sdk;
 use AiSdk\Support\Usage;
 use AiSdk\Utils\Errors\HttpErrorNormalizer;
 use AiSdk\Utils\Support\Url;
+use GuzzleHttp\Exception\TransferException;
+use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -67,7 +70,7 @@ final class BedrockImageModel extends BaseModel implements ImageModelInterface
             ->withBody($sdk->streamFactory->createStream(Json::encode($body)))
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('Accept', 'application/json');
-        $response = $sdk->httpClient->sendRequest($this->authorize($httpRequest, $sdk));
+        $response = $this->send($sdk, $this->authorize($httpRequest, $sdk));
         $this->ensureSuccess($response);
 
         $payload = Json::decode((string) $response->getBody(), $this->provider());
@@ -102,6 +105,19 @@ final class BedrockImageModel extends BaseModel implements ImageModelInterface
         }
 
         return [(int) $matches[1], (int) $matches[2]];
+    }
+
+    private function send(Sdk $sdk, RequestInterface $request): ResponseInterface
+    {
+        try {
+            return $sdk->httpClient->sendRequest($request);
+        } catch (ClientExceptionInterface|TransferException $e) {
+            throw new APIConnectionException(
+                message: 'Bedrock transport error: ' . $e->getMessage(),
+                context: ['provider' => $this->provider(), 'modelId' => $this->modelId, 'url' => (string) $request->getUri()],
+                previous: $e,
+            );
+        }
     }
 
     private function authorize(RequestInterface $request, Sdk $sdk): RequestInterface

@@ -18,4 +18,26 @@ final class MapsFinishReasons
             default => FinishReason::Unknown,
         };
     }
+
+    public static function fromAnthropic(?string $reason): FinishReason
+    {
+        return match ($reason) {
+            'end_turn', 'stop_sequence', 'stop' => FinishReason::Stop,
+            'max_tokens' => FinishReason::Length,
+            'tool_use' => FinishReason::ToolCalls,
+            'content_filtered', 'guardrail_intervened' => FinishReason::ContentFilter,
+            default => FinishReason::Unknown,
+        };
+    }
+
+    public static function fromOpenAi(?string $reason): FinishReason
+    {
+        return match ($reason) {
+            'stop' => FinishReason::Stop,
+            'length' => FinishReason::Length,
+            'tool_calls' => FinishReason::ToolCalls,
+            'content_filter' => FinishReason::ContentFilter,
+            default => FinishReason::Unknown,
+        };
+    }
 }

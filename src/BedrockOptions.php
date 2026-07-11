@@ -25,6 +25,9 @@ final class BedrockOptions
         public readonly ?string $profile,
         public readonly string $region,
         public readonly string $baseUrl,
+        public readonly BedrockApi $api = BedrockApi::Converse,
+        public readonly bool $apiConfigured = false,
+        public readonly bool $baseUrlConfigured = false,
         public readonly array $headers = [],
         public readonly ?Sdk $sdk = null,
     ) {}
@@ -62,8 +65,12 @@ final class BedrockOptions
         // AWS credential chain (env, INI, SSO, IMDS, ECS, assume-role,
         // web-identity) resolved by aws/aws-sdk-php at request time.
 
+        $apiConfigured = array_key_exists('api', $config);
+        $api = BedrockApi::resolve($config['api'] ?? null);
+
         $base = Env::loadOptionalSetting(isset($config['baseUrl']) ? (string) $config['baseUrl'] : null, 'AWS_BEDROCK_BASE_URL');
-        $baseUrl = Url::withoutTrailingSlash($base ?? self::defaultRuntimeUrl($region));
+        $baseUrlConfigured = $base !== null;
+        $baseUrl = Url::withoutTrailingSlash($base ?? self::defaultUrl($region, $api));
 
         /** @var array<string, string> $headers */
         $headers = isset($config['headers']) && is_array($config['headers']) ? $config['headers'] : [];
@@ -77,6 +84,9 @@ final class BedrockOptions
             profile: $profile,
             region: $region,
             baseUrl: $baseUrl,
+            api: $api,
+            apiConfigured: $apiConfigured,
+            baseUrlConfigured: $baseUrlConfigured,
             headers: $headers,
             sdk: $sdk instanceof Sdk ? $sdk : null,
         );
@@ -85,6 +95,16 @@ final class BedrockOptions
     public static function defaultRuntimeUrl(string $region): string
     {
         return 'https://bedrock-runtime.' . rawurlencode($region) . '.amazonaws.com';
+    }
+
+    public static function defaultMantleUrl(string $region): string
+    {
+        return 'https://bedrock-mantle.' . rawurlencode($region) . '.api.aws/v1';
+    }
+
+    public static function defaultUrl(string $region, BedrockApi $api): string
+    {
+        return $api->isMantle() ? self::defaultMantleUrl($region) : self::defaultRuntimeUrl($region);
     }
 
     /**
