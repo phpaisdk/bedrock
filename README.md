@@ -1,6 +1,6 @@
 # aisdk/bedrock
 
-Official Amazon Bedrock provider for the framework-agnostic PHP AI SDK. Anthropic models use native **InvokeModel** by default, other text models use **Converse**, and images use **InvokeModel**. Bedrock's OpenAI-compatible Chat Completions and Responses surfaces are also available.
+Official Amazon Bedrock provider for the framework-agnostic PHP AI SDK. Anthropic models use native **InvokeModel** by default, other text models use **Converse**, and images and embeddings use **InvokeModel**. Bedrock's OpenAI-compatible Chat Completions and Responses surfaces are also available.
 
 ## Installation
 
@@ -53,6 +53,28 @@ $image = Generate::image('A studio product photograph')
     ->aspectRatio('16:9')
     ->run();
 ```
+
+## Embeddings
+
+Amazon Titan Text Embeddings V1/V2 and Cohere Embed v3/v4 use their native Bedrock request and response formats:
+
+```php
+$embedding = Generate::embedding('A document to index')
+    ->model(Bedrock::embedding('cohere.embed-v4:0'))
+    ->dimensions(512)
+    ->providerOptions('amazon-bedrock', [
+        'input_type' => 'search_document',
+    ])
+    ->run();
+
+$vector = $embedding->output->vector;
+```
+
+Cohere requires an `input_type`: `search_document`, `search_query`, `classification`, or `clustering`. Cohere v4 supports 256, 512, 1024, or 1536 dimensions; Cohere v3 has a fixed output size.
+
+Titan V2 supports 256, 512, or 1024 dimensions and its `normalize` option can be passed through `providerOptions()`. Titan V1 has a fixed output size. Bedrock accepts one Titan text per invocation, so the SDK invokes the model once per input when you pass a list.
+
+Other Bedrock embedding model families are rejected because their native wire formats are not interchangeable.
 
 Bedrock speech is intentionally not exposed through `Generate::speech()`: Nova Sonic uses a bidirectional streaming API and belongs in the future realtime package rather than the synchronous speech contract.
 
@@ -118,3 +140,10 @@ $result = Generate::text('Explain the tradeoff.')
 ```bash
 composer test
 ```
+
+## Links
+
+- [Cohere Embed v4 on Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed-v4.html)
+- [Cohere Embed v3 on Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed-v3.html)
+- [Amazon Titan Text Embeddings](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-titan-embed-text.html)
+- [Core Package](https://github.com/phpaisdk/core)

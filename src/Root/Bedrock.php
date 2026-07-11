@@ -6,6 +6,7 @@ namespace AiSdk;
 
 use AiSdk\Bedrock\BedrockOptions;
 use AiSdk\Bedrock\BedrockProvider;
+use AiSdk\Contracts\EmbeddingModelInterface;
 use AiSdk\Contracts\ImageModelInterface;
 use AiSdk\Contracts\TextModelInterface;
 
@@ -39,5 +40,10 @@ final class Bedrock
     public static function image(string $modelId): ImageModelInterface
     {
         return self::default()->imageModel($modelId);
+    }
+
+    public static function embedding(string $modelId): EmbeddingModelInterface
+    {
+        return self::default()->embeddingModel($modelId);
     }
 }

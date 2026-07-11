@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace AiSdk\Bedrock;
 
+use AiSdk\Bedrock\Models\BedrockEmbeddingModel;
 use AiSdk\Bedrock\Models\BedrockImageModel;
 use AiSdk\Bedrock\Models\BedrockTextModel;
 use AiSdk\Contracts\BaseProvider;
+use AiSdk\Contracts\EmbeddingModelInterface;
+use AiSdk\Contracts\EmbeddingProviderInterface;
 use AiSdk\Contracts\ImageModelInterface;
 use AiSdk\Contracts\ImageProviderInterface;
 use AiSdk\Contracts\TextModelInterface;
 use AiSdk\Contracts\TextProviderInterface;
 
-final class BedrockProvider extends BaseProvider implements ImageProviderInterface, TextProviderInterface
+final class BedrockProvider extends BaseProvider implements EmbeddingProviderInterface, ImageProviderInterface, TextProviderInterface
 {
     public function __construct(public readonly BedrockOptions $options) {}
 
@@ -29,5 +32,10 @@ final class BedrockProvider extends BaseProvider implements ImageProviderInterfa
     public function imageModel(string $modelId): ImageModelInterface
     {
         return new BedrockImageModel($modelId, $this->options);
+    }
+
+    public function embeddingModel(string $modelId): EmbeddingModelInterface
+    {
+        return new BedrockEmbeddingModel($modelId, $this->options);
     }
 }
