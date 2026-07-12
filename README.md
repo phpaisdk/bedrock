@@ -56,6 +56,19 @@ $image = Generate::image('A studio product photograph')
 
 ## Embeddings
 
+## Video generation
+
+Amazon Nova Reel writes generated videos to your S3 bucket.
+
+```php
+$result = Generate::video('A cinematic forest flyover')
+    ->model(Bedrock::video('amazon.nova-reel-v1:1'))
+    ->resolution('1280x720')
+    ->duration(6)
+    ->providerOptions('bedrock', ['outputS3Uri' => 's3://my-video-bucket/outputs'])
+    ->run(timeout: 1200);
+```
+
 Amazon Titan Text Embeddings V1/V2 and Cohere Embed v3/v4 use their native Bedrock request and response formats:
 
 ```php

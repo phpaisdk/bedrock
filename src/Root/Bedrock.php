@@ -9,6 +9,7 @@ use AiSdk\Bedrock\BedrockProvider;
 use AiSdk\Contracts\EmbeddingModelInterface;
 use AiSdk\Contracts\ImageModelInterface;
 use AiSdk\Contracts\TextModelInterface;
+use AiSdk\Contracts\VideoModelInterface;
 
 final class Bedrock
 {
@@ -45,5 +46,9 @@ final class Bedrock
     public static function embedding(string $modelId): EmbeddingModelInterface
     {
         return self::default()->embeddingModel($modelId);
+    }
+    public static function video(string $modelId): VideoModelInterface
+    {
+        return self::default()->videoModel($modelId);
     }
 }
