@@ -1,5 +1,13 @@
 # aisdk/bedrock
 
+<a href="https://github.com/phpaisdk/bedrock/actions"><img alt="GitHub Workflow Status" src="https://img.shields.io/github/actions/workflow/status/phpaisdk/bedrock/tests.yml?branch=main&label=Tests"></a>
+<a href="https://packagist.org/packages/aisdk/bedrock"><img alt="Total Downloads" src="https://img.shields.io/packagist/dt/aisdk/bedrock"></a>
+<a href="https://packagist.org/packages/aisdk/bedrock"><img alt="Latest Version" src="https://img.shields.io/packagist/v/aisdk/bedrock"></a>
+<a href="https://packagist.org/packages/aisdk/bedrock"><img alt="License" src="https://img.shields.io/packagist/l/aisdk/bedrock"></a>
+<a href="https://whyphp.dev"><img src="https://img.shields.io/badge/Why_PHP-in_2026-7A86E8?style=flat-square&labelColor=18181b" alt="Why PHP in 2026"></a>
+
+------
+
 Official Amazon Bedrock provider for the framework-agnostic PHP AI SDK. Anthropic models use native **InvokeModel** by default, other text models use **Converse**, and images and embeddings use **InvokeModel**. Bedrock's OpenAI-compatible Chat Completions and Responses surfaces are also available.
 
 ## Installation
