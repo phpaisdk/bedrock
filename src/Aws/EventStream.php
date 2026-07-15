@@ -133,11 +133,12 @@ final class EventStream
 
     private static function encodeHeader(string $name, int $type, mixed $value): string
     {
-        if ($name === '' || strlen($name) > 255) {
+        $nameLength = strlen($name);
+        if ($nameLength < 1 || $nameLength > 255) {
             throw new \InvalidArgumentException('AWS EventStream header names must contain between 1 and 255 bytes.');
         }
 
-        $prefix = chr(strlen($name)) . $name . chr($type);
+        $prefix = chr($nameLength) . $name . chr($type);
 
         return $prefix . match ($type) {
             self::TYPE_BOOLEAN_TRUE, self::TYPE_BOOLEAN_FALSE => '',
