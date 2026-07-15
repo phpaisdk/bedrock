@@ -20,7 +20,7 @@ it('generates images with Amazon Nova Canvas through InvokeModel', function () {
     Bedrock::create(['apiKey' => 'bedrock-token']);
 
     $result = Generate::image('A product photograph')
-        ->model(Bedrock::image('amazon.nova-canvas-v1:0'))
+        ->model(Bedrock::model('amazon.nova-canvas-v1:0'))
         ->aspectRatio('16:9')
         ->seed(42)
         ->run();

@@ -54,6 +54,45 @@ final class BedrockAuth
         return $this->signWithFallback($request);
     }
 
+    /**
+     * Resolve credentials for SigV4-signed bidirectional EventStream requests.
+     * Bedrock bearer API keys do not support this operation.
+     *
+     * @return array{accessKeyId: string, secretAccessKey: string, sessionToken: ?string}
+     */
+    public function streamingCredentials(): array
+    {
+        if ($this->usesBearer()) {
+            throw new InvalidArgumentException(
+                'Bedrock Live requires standard AWS credentials; Bedrock API keys do not support InvokeModelWithBidirectionalStream.',
+                ['provider' => BedrockOptions::PROVIDER_NAME],
+            );
+        }
+
+        if ($this->options->accessKeyId !== null && $this->options->secretAccessKey !== null) {
+            return [
+                'accessKeyId' => $this->options->accessKeyId,
+                'secretAccessKey' => $this->options->secretAccessKey,
+                'sessionToken' => $this->options->sessionToken,
+            ];
+        }
+
+        if (! class_exists(SignatureV4::class)) {
+            throw new InvalidArgumentException(
+                'Bedrock Live credential-chain resolution requires aws/aws-sdk-php. Install it or provide accessKeyId and secretAccessKey.',
+                ['provider' => BedrockOptions::PROVIDER_NAME],
+            );
+        }
+
+        $credentials = $this->resolveAwsCredentials();
+
+        return [
+            'accessKeyId' => $credentials->getAccessKeyId(),
+            'secretAccessKey' => $credentials->getSecretKey(),
+            'sessionToken' => $credentials->getSecurityToken(),
+        ];
+    }
+
     private function signWithAwsSdk(RequestInterface $request): RequestInterface
     {
         $credentials = $this->resolveAwsCredentials();

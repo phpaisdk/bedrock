@@ -38,7 +38,7 @@ it('generates Cohere Embed v4 embeddings through signed InvokeModel requests', f
     ]);
 
     $result = Generate::embedding(['Document one', 'Document two'])
-        ->model(Bedrock::embedding('cohere.embed-v4:0'))
+        ->model(Bedrock::model('cohere.embed-v4:0'))
         ->dimensions(512)
         ->providerOptions('amazon-bedrock', [
             'input_type' => 'search_document',
@@ -74,7 +74,7 @@ it('uses the Cohere Embed v3 wire format without v4 dimensions', function () {
     Bedrock::create(['apiKey' => 'bedrock-token']);
 
     $result = Generate::embedding('A query')
-        ->model(Bedrock::embedding('cohere.embed-english-v3'))
+        ->model(Bedrock::model('cohere.embed-english-v3'))
         ->providerOptions('amazon-bedrock', ['input_type' => 'search_query'])
         ->run();
 
@@ -92,7 +92,7 @@ it('requires the documented Cohere input type before sending a request', functio
     Bedrock::create(['apiKey' => 'bedrock-token']);
 
     Generate::embedding('A document')
-        ->model(Bedrock::embedding('cohere.embed-v4:0'))
+        ->model(Bedrock::model('cohere.embed-v4:0'))
         ->run();
 })->throws(\AiSdk\Exceptions\InvalidArgumentException::class, 'requires input_type');
 
@@ -102,7 +102,7 @@ it('rejects configurable dimensions for Cohere Embed v3', function () {
     Bedrock::create(['apiKey' => 'bedrock-token']);
 
     Generate::embedding('A document')
-        ->model(Bedrock::embedding('cohere.embed-multilingual-v3'))
+        ->model(Bedrock::model('cohere.embed-multilingual-v3'))
         ->dimensions(512)
         ->providerOptions('amazon-bedrock', ['input_type' => 'search_document'])
         ->run();
@@ -117,7 +117,7 @@ it('rejects incomplete Cohere embedding batches', function () {
     Bedrock::create(['apiKey' => 'bedrock-token']);
 
     Generate::embedding(['First document', 'Second document'])
-        ->model(Bedrock::embedding('cohere.embed-v4:0'))
+        ->model(Bedrock::model('cohere.embed-v4:0'))
         ->providerOptions('amazon-bedrock', ['input_type' => 'search_document'])
         ->run();
 })->throws(\AiSdk\Exceptions\InvalidResponseException::class, 'unexpected number');
@@ -132,7 +132,7 @@ it('fans out Titan V2 inputs and aggregates token usage', function () {
     Bedrock::create(['apiKey' => 'bedrock-token', 'api' => 'mantle_responses', 'region' => 'eu-west-1']);
 
     $result = Generate::embedding(['First document', 'Second document'])
-        ->model(Bedrock::embedding('amazon.titan-embed-text-v2:0'))
+        ->model(Bedrock::model('amazon.titan-embed-text-v2:0'))
         ->dimensions(256)
         ->providerOptions('amazon-bedrock', ['normalize' => false])
         ->run();
@@ -160,7 +160,7 @@ it('uses the Titan V1 inputText-only request format', function () {
     Bedrock::create(['apiKey' => 'bedrock-token']);
 
     $result = Generate::embedding('Legacy document')
-        ->model(Bedrock::embedding('amazon.titan-embed-text-v1'))
+        ->model(Bedrock::model('amazon.titan-embed-text-v1'))
         ->run();
 
     expect($result->output->vector)->toBe([0.5, -0.5])
@@ -174,7 +174,7 @@ it('rejects unknown Bedrock embedding wire families before sending a request', f
     Bedrock::create(['apiKey' => 'bedrock-token']);
 
     Generate::embedding('A document')
-        ->model(Bedrock::embedding('vendor.future-embedding-v1:0'))
+        ->model(Bedrock::model('vendor.future-embedding-v1:0'))
         ->run();
 })->throws(\AiSdk\Exceptions\InvalidArgumentException::class, 'unsupported wire format');
 
@@ -187,6 +187,6 @@ it('rejects Titan responses without a float embedding', function () {
     Bedrock::create(['apiKey' => 'bedrock-token']);
 
     Generate::embedding('A document')
-        ->model(Bedrock::embedding('amazon.titan-embed-text-v2:0'))
+        ->model(Bedrock::model('amazon.titan-embed-text-v2:0'))
         ->run();
 })->throws(\AiSdk\Exceptions\InvalidResponseException::class, 'no valid float embedding');

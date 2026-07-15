@@ -9,32 +9,67 @@ use AiSdk\Exceptions\InvalidResponseException;
 use Generator;
 use Psr\Http\Message\StreamInterface;
 
-/**
- * Minimal AWS Event Stream encoder/decoder for Bedrock Converse Stream responses.
- *
- * @see https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPOST.html (event stream framing)
- */
+/** Amazon EventStream binary framing and CRC implementation. */
 final class EventStream
 {
+    public const int TYPE_BOOLEAN_TRUE = 0;
+
+    public const int TYPE_BOOLEAN_FALSE = 1;
+
+    public const int TYPE_BYTE = 2;
+
+    public const int TYPE_SHORT = 3;
+
+    public const int TYPE_INTEGER = 4;
+
+    public const int TYPE_LONG = 5;
+
+    public const int TYPE_BINARY = 6;
+
+    public const int TYPE_STRING = 7;
+
+    public const int TYPE_TIMESTAMP = 8;
+
+    public const int TYPE_UUID = 9;
+
     /**
-     * Encode a single Bedrock stream event (headers :message-type + :event-type + JSON payload).
+     * @param array<string, array{type: int, value: mixed}> $headers
      */
+    public static function encodeMessage(array $headers, string $payload = ''): string
+    {
+        $headersBinary = '';
+        foreach ($headers as $name => $header) {
+            $headersBinary .= self::encodeHeader($name, $header['type'], $header['value']);
+        }
+
+        $headersLength = strlen($headersBinary);
+        $totalLength = 16 + $headersLength + strlen($payload);
+        $preludeBytes = self::uint32Be($totalLength) . self::uint32Be($headersLength);
+        $prelude = $preludeBytes . self::uint32Be(self::crc32Unsigned($preludeBytes));
+        $message = $prelude . $headersBinary . $payload;
+
+        return $message . self::uint32Be(self::crc32Unsigned($message));
+    }
+
+    /** Encodes an ordinary Smithy event message. */
     public static function encodeEvent(string $eventType, string $jsonPayload): string
     {
-        $headersBin = self::encodeStringHeader(':message-type', 'event')
-            . self::encodeStringHeader(':event-type', $eventType);
-        $headersLen = strlen($headersBin);
-        $payloadLen = strlen($jsonPayload);
-        $totalLen = 12 + $headersLen + $payloadLen + 4;
+        return self::encodeMessage([
+            ':message-type' => ['type' => self::TYPE_STRING, 'value' => 'event'],
+            ':event-type' => ['type' => self::TYPE_STRING, 'value' => $eventType],
+        ], $jsonPayload);
+    }
 
-        $preludeFirst8 = self::uint32Be($totalLen) . self::uint32Be($headersLen);
-        $preludeCrc = self::crc32Unsigned($preludeFirst8);
+    /** Encodes the Smithy `chunk` union used by Bedrock bidirectional streams. */
+    public static function encodeChunk(string $bytes): string
+    {
+        $payload = json_encode(['bytes' => base64_encode($bytes)], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 
-        $prelude = $preludeFirst8 . self::uint32Be($preludeCrc);
-        $withoutTrailingCrc = $prelude . $headersBin . $jsonPayload;
-        $messageCrc = self::crc32Unsigned($withoutTrailingCrc);
-
-        return $withoutTrailingCrc . self::uint32Be($messageCrc);
+        return self::encodeMessage([
+            ':event-type' => ['type' => self::TYPE_STRING, 'value' => 'chunk'],
+            ':message-type' => ['type' => self::TYPE_STRING, 'value' => 'event'],
+            ':content-type' => ['type' => self::TYPE_STRING, 'value' => 'application/json'],
+        ], $payload);
     }
 
     /**
@@ -42,82 +77,31 @@ final class EventStream
      */
     public static function decodeStreamChunks(string|StreamInterface $chunks): Generator
     {
-        $buffer = '';
+        $decoder = new EventStreamDecoder();
 
         foreach (self::chunks($chunks) as $chunk) {
-            $buffer .= $chunk;
-
-            while (strlen($buffer) >= 4) {
-                $totalLen = self::readUint32Be($buffer, 0);
-                if ($totalLen < 16) {
-                    throw self::invalid('Bedrock returned an invalid event-stream frame length.');
-                }
-                if (strlen($buffer) < $totalLen) {
-                    break;
-                }
-
-                $frame = substr($buffer, 0, $totalLen);
-                $buffer = substr($buffer, $totalLen);
-                $decoded = self::decodeMessage($frame);
-                $messageType = $decoded[':message-type'] ?? '';
-                $eventType = $decoded[':event-type'] ?? $decoded[':exception-type'] ?? '';
+            foreach ($decoder->push($chunk) as $message) {
+                $messageType = $message->stringHeader(':message-type') ?? '';
+                $eventType = $message->stringHeader(':event-type')
+                    ?? $message->stringHeader(':exception-type')
+                    ?? '';
 
                 if ($messageType === 'exception' || $messageType === 'error' || str_ends_with($eventType, 'Exception')) {
-                    $payload = json_decode($decoded['__payload'], true);
-                    $message = is_array($payload) && is_string($payload['message'] ?? null)
+                    $payload = json_decode($message->payload, true);
+                    $errorMessage = is_array($payload) && is_string($payload['message'] ?? null)
                         ? $payload['message']
                         : 'Bedrock returned an event-stream exception.';
 
-                    throw self::invalid($message, ['eventType' => $eventType]);
+                    throw self::invalid($errorMessage, ['eventType' => $eventType]);
                 }
 
                 if ($messageType === 'event' && $eventType !== '') {
-                    yield ['eventType' => $eventType, 'data' => $decoded['__payload']];
+                    yield ['eventType' => $eventType, 'data' => $message->payload];
                 }
             }
         }
 
-        if ($buffer !== '') {
-            throw self::invalid('Bedrock ended an event stream with an incomplete frame.');
-        }
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private static function decodeMessage(string $message): array
-    {
-        $len = strlen($message);
-        if ($len < 16) {
-            throw self::invalid('Bedrock returned a truncated event-stream frame.');
-        }
-
-        $totalLen = self::readUint32Be($message, 0);
-        $headersLen = self::readUint32Be($message, 4);
-        $preludeCrcExpected = self::readUint32Be($message, 8);
-
-        if ($len !== $totalLen || $totalLen < 16 + $headersLen) {
-            throw self::invalid('Bedrock returned inconsistent event-stream frame lengths.');
-        }
-
-        $prelude8 = substr($message, 0, 8);
-        if (self::crc32Unsigned($prelude8) !== $preludeCrcExpected) {
-            throw self::invalid('Bedrock returned an event stream with an invalid prelude checksum.');
-        }
-
-        $headersBin = substr($message, 12, $headersLen);
-        $payload = substr($message, 12 + $headersLen, $totalLen - 16 - $headersLen);
-
-        $withoutCrc = substr($message, 0, $totalLen - 4);
-        $msgCrcExpected = self::readUint32Be($message, $totalLen - 4);
-        if (self::crc32Unsigned($withoutCrc) !== $msgCrcExpected) {
-            throw self::invalid('Bedrock returned an event stream with an invalid message checksum.');
-        }
-
-        $headers = self::parseHeaders($headersBin);
-        $headers['__payload'] = $payload;
-
-        return $headers;
+        $decoder->finish();
     }
 
     /** @return Generator<int, string> */
@@ -142,76 +126,97 @@ final class EventStream
     }
 
     /** @param array<string, mixed> $context */
-    private static function invalid(string $message, array $context = []): InvalidResponseException
+    public static function invalid(string $message, array $context = []): InvalidResponseException
     {
         return InvalidResponseException::forProvider(BedrockOptions::PROVIDER_NAME, $message, $context);
     }
 
-    /**
-     * @return array<string, string>
-     */
-    private static function parseHeaders(string $headersBin): array
+    private static function encodeHeader(string $name, int $type, mixed $value): string
     {
-        $out = [];
-        $offset = 0;
-        $max = strlen($headersBin);
-        while ($offset < $max) {
-            $nameLen = ord($headersBin[$offset]);
-            $offset++;
-            $name = substr($headersBin, $offset, $nameLen);
-            $offset += $nameLen;
-            if ($offset >= $max) {
-                break;
-            }
-            $type = ord($headersBin[$offset]);
-            $offset++;
-            if ($type === 7) {
-                if ($offset + 2 > $max) {
-                    break;
-                }
-                $valLen = (ord($headersBin[$offset]) << 8) | ord($headersBin[$offset + 1]);
-                $offset += 2;
-                $value = substr($headersBin, $offset, $valLen);
-                $offset += $valLen;
-                $out[$name] = $value;
-            } else {
-                break;
-            }
+        if ($name === '' || strlen($name) > 255) {
+            throw new \InvalidArgumentException('AWS EventStream header names must contain between 1 and 255 bytes.');
         }
 
-        return $out;
+        $prefix = chr(strlen($name)) . $name . chr($type);
+
+        return $prefix . match ($type) {
+            self::TYPE_BOOLEAN_TRUE, self::TYPE_BOOLEAN_FALSE => '',
+            self::TYPE_BYTE => pack('c', (int) $value),
+            self::TYPE_SHORT => pack('n', (int) $value & 0xFFFF),
+            self::TYPE_INTEGER => pack('N', (int) $value & 0xFFFFFFFF),
+            self::TYPE_LONG, self::TYPE_TIMESTAMP => self::uint64Be((int) $value),
+            self::TYPE_BINARY, self::TYPE_STRING => self::lengthPrefixed((string) $value),
+            self::TYPE_UUID => self::uuidBytes((string) $value),
+            default => throw new \InvalidArgumentException("Unsupported AWS EventStream header type [{$type}]."),
+        };
     }
 
-    private static function encodeStringHeader(string $name, string $value): string
+    private static function lengthPrefixed(string $value): string
     {
-        $nb = strlen($name);
-        if ($nb > 255) {
-            throw new \InvalidArgumentException('AWS event-stream header names cannot exceed 255 bytes.');
+        if (strlen($value) > 65_535) {
+            throw new \InvalidArgumentException('AWS EventStream string and binary headers cannot exceed 65535 bytes.');
         }
 
-        return chr($nb) . $name . chr(7) . pack('n', strlen($value)) . $value;
+        return pack('n', strlen($value)) . $value;
     }
 
-    private static function uint32Be(int $value): string
+    private static function uuidBytes(string $uuid): string
+    {
+        $hex = str_replace('-', '', $uuid);
+        $bytes = hex2bin($hex);
+        if ($bytes === false || strlen($bytes) !== 16) {
+            throw new \InvalidArgumentException('AWS EventStream UUID headers must contain a valid UUID.');
+        }
+
+        return $bytes;
+    }
+
+    public static function uint32Be(int $value): string
     {
         return pack('N', $value & 0xFFFFFFFF);
     }
 
-    private static function readUint32Be(string $data, int $offset): int
+    public static function uint64Be(int $value): string
     {
-        $chunk = substr($data, $offset, 4);
-        if (strlen($chunk) !== 4) {
-            return 0;
-        }
-        $v = unpack('N', $chunk);
-        if ($v === false) {
-            return 0;
-        }
+        $high = ($value >> 32) & 0xFFFFFFFF;
+        $low = $value & 0xFFFFFFFF;
 
-        return (int) ($v[1] & 0xFFFFFFFF);
+        return pack('NN', $high & 0xFFFFFFFF, $low & 0xFFFFFFFF);
     }
 
-    private static function crc32Unsigned(string $data): int
+    public static function readUint32Be(string $data, int $offset): int
+    {
+        $value = unpack('Nvalue', substr($data, $offset, 4));
+
+        return is_array($value) ? ((int) $value['value'] & 0xFFFFFFFF) : 0;
+    }
+
+    public static function readUint64Be(string $data, int $offset): int
+    {
+        $value = unpack('Nhigh/Nlow', substr($data, $offset, 8));
+        if (! is_array($value)) {
+            return 0;
+        }
+
+        return ((int) $value['high'] * 4_294_967_296) + (int) $value['low'];
+    }
+
+    public static function readInt64Be(string $data, int $offset): int
+    {
+        $value = unpack('Nhigh/Nlow', substr($data, $offset, 8));
+        if (! is_array($value)) {
+            return 0;
+        }
+
+        $high = (int) $value['high'];
+        if (($high & 0x80000000) !== 0) {
+            $high -= 4_294_967_296;
+        }
+
+        return ($high * 4_294_967_296) + (int) $value['low'];
+    }
+
+    public static function crc32Unsigned(string $data): int
     {
         return crc32($data) & 0xFFFFFFFF;
     }

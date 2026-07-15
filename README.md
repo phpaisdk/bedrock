@@ -49,31 +49,18 @@ foreach (Generate::text('Tell me a story.')->model(Bedrock::model('anthropic.cla
 
 ```php
 $image = Generate::image('A studio product photograph')
-    ->model(Bedrock::image('amazon.nova-canvas-v1:0'))
+    ->model(Bedrock::model('amazon.nova-canvas-v1:0'))
     ->aspectRatio('16:9')
     ->run();
 ```
 
 ## Embeddings
 
-## Video generation
-
-Amazon Nova Reel writes generated videos to your S3 bucket.
-
-```php
-$result = Generate::video('A cinematic forest flyover')
-    ->model(Bedrock::video('amazon.nova-reel-v1:1'))
-    ->resolution('1280x720')
-    ->duration(6)
-    ->providerOptions('bedrock', ['outputS3Uri' => 's3://my-video-bucket/outputs'])
-    ->run(timeout: 1200);
-```
-
 Amazon Titan Text Embeddings V1/V2 and Cohere Embed v3/v4 use their native Bedrock request and response formats:
 
 ```php
 $embedding = Generate::embedding('A document to index')
-    ->model(Bedrock::embedding('cohere.embed-v4:0'))
+    ->model(Bedrock::model('cohere.embed-v4:0'))
     ->dimensions(512)
     ->providerOptions('amazon-bedrock', [
         'input_type' => 'search_document',
@@ -89,7 +76,125 @@ Titan V2 supports 256, 512, or 1024 dimensions and its `normalize` option can be
 
 Other Bedrock embedding model families are rejected because their native wire formats are not interchangeable.
 
-Bedrock speech is intentionally not exposed through `Generate::speech()`: Nova Sonic uses a bidirectional streaming API and belongs in the future realtime package rather than the synchronous speech contract.
+## Video generation
+
+Amazon Nova Reel writes generated videos to your S3 bucket.
+
+```php
+$result = Generate::video('A cinematic forest flyover')
+    ->model(Bedrock::model('amazon.nova-reel-v1:1'))
+    ->resolution('1280x720')
+    ->duration(6)
+    ->providerOptions('amazon-bedrock', ['outputS3Uri' => 's3://my-video-bucket/outputs'])
+    ->run(timeout: 1200);
+```
+
+## Live voice with Nova 2 Sonic
+
+Nova Sonic uses Bedrock's full-duplex `InvokeModelWithBidirectionalStream`
+operation. Install the ready-made transport package for HTTP/2:
+
+```bash
+composer require aisdk/transport
+```
+
+```php
+use AiSdk\Bedrock;
+use AiSdk\Live;
+use AiSdk\Live\AudioDelta;
+use AiSdk\Live\TranscriptDelta;
+use AiSdk\Transport;
+
+Bedrock::create([
+    'accessKeyId' => getenv('AWS_ACCESS_KEY_ID'),
+    'secretAccessKey' => getenv('AWS_SECRET_ACCESS_KEY'),
+    'sessionToken' => getenv('AWS_SESSION_TOKEN') ?: null,
+    'region' => 'us-east-1',
+]);
+
+$session = Live::voice()
+    ->model(Bedrock::model('amazon.nova-2-sonic-v1:0'))
+    ->instructions('Be concise and helpful.')
+    ->voice('matthew')
+    ->inputAudioFormat('pcm16')
+    ->outputAudioFormat('pcm16')
+    ->connect(Transport::auto());
+
+$session->sendAudio($pcm16Chunk);
+
+foreach ($session->events() as $event) {
+    if ($event instanceof AudioDelta) {
+        playPcm16($event->bytes);
+    }
+
+    if ($event instanceof TranscriptDelta) {
+        echo $event->delta;
+    }
+}
+
+$session->close();
+```
+
+The input is signed 16-bit little-endian linear PCM. Input sample rate defaults
+to 16 kHz and output defaults to 24 kHz. Provider-specific Nova settings can be
+overridden without expanding the shared core API:
+
+```php
+$session = Live::voice()
+    ->model(Bedrock::model('amazon.nova-2-sonic-v1:0'))
+    ->turnDetection('medium')
+    ->providerOptions('amazon-bedrock', [
+        'inferenceConfiguration' => [
+            'maxTokens' => 2048,
+            'temperature' => 0.7,
+            'topP' => 0.9,
+        ],
+        'turnDetectionConfiguration' => [
+            'endpointingSensitivity' => 'MEDIUM',
+        ],
+        'inputAudioConfiguration' => [
+            'sampleRateHertz' => 16000,
+        ],
+        'outputAudioConfiguration' => [
+            'sampleRateHertz' => 24000,
+        ],
+    ])
+    ->connect(Transport::http2());
+```
+
+`AiSdk\Live` and its transport contracts are provided by `aisdk/core`, so the
+ready-made transport is optional. Without `aisdk/transport`, pass an
+application transport that supports core's `Http2Endpoint`:
+
+```php
+use App\Ai\AppHttp2Transport;
+
+$session = Live::voice()
+    ->model(Bedrock::model('amazon.nova-2-sonic-v1:0'))
+    ->connect(new AppHttp2Transport());
+```
+
+The custom transport only moves full-duplex HTTP/2 byte frames and implements
+half-closing. AWS signing, EventStream framing, and Nova event semantics remain
+inside `aisdk/bedrock`.
+
+`sendText()` provides Nova's cross-modal text input. Tools registered through
+`->tools()` are sent in `promptStart`; tool calls are normalized by core and
+their results are returned with Nova's required tool event sequence.
+
+Nova Sonic continuously applies server turn detection, so it does not expose
+manual `commitAudio()`, `clearAudio()`, `requestResponse()`, or
+`cancelResponse()` actions. Bedrock also does not expose dedicated
+`Live::transcribe()` or `Live::translate()` sessions; voice sessions still emit
+normalized transcription events.
+
+The legacy `amazon.nova-sonic-v1:0` model remains protocol-compatible for
+audio sessions, but it does not support Nova 2's cross-modal `sendText()` or
+configurable endpointing sensitivity.
+
+Bedrock bearer API keys cannot authenticate bidirectional streaming. Live uses
+standard AWS credentials with SigV4. Explicit keys work without the AWS SDK;
+profiles and the default credential chain require `aws/aws-sdk-php`.
 
 ## Authentication
 
@@ -108,7 +213,9 @@ credential providers. Install it to enable them:
 composer require aws/aws-sdk-php
 ```
 
-Bearer tokens and explicit static keys work without it.
+Bearer tokens and explicit static keys work without it for ordinary Bedrock
+requests. Live voice specifically requires SigV4 credentials and does not
+support bearer tokens.
 
 | Variable | Description |
 |---|---|
@@ -154,9 +261,15 @@ $result = Generate::text('Explain the tradeoff.')
 composer test
 ```
 
+The default suite is fixture- and conformance-based. Credentialed Live network
+verification is separate and is not run by `composer test`.
+
 ## Links
 
 - [Cohere Embed v4 on Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed-v4.html)
 - [Cohere Embed v3 on Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed-v3.html)
 - [Amazon Titan Text Embeddings](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-titan-embed-text.html)
+- [Bedrock bidirectional streaming API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithBidirectionalStream.html)
+- [Nova Sonic input events](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-input-events.html)
+- [Nova Sonic output events](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-output-events.html)
 - [Core Package](https://github.com/phpaisdk/core)
