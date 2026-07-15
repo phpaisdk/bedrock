@@ -137,6 +137,9 @@ final class EventStream
         if ($nameLength < 1 || $nameLength > 255) {
             throw new \InvalidArgumentException('AWS EventStream header names must contain between 1 and 255 bytes.');
         }
+        if ($type < 0 || $type > 255) {
+            throw new \InvalidArgumentException('AWS EventStream header types must contain between 0 and 255.');
+        }
 
         $prefix = chr($nameLength) . $name . chr($type);
 
