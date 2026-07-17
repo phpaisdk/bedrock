@@ -272,12 +272,13 @@ composer test
 The default suite is fixture- and conformance-based. Credentialed Live network
 verification is separate and is not run by `composer test`.
 
-## Links
+## Documentation
 
-- [Cohere Embed v4 on Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed-v4.html)
-- [Cohere Embed v3 on Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-embed-v3.html)
-- [Amazon Titan Text Embeddings](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-titan-embed-text.html)
-- [Bedrock bidirectional streaming API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithBidirectionalStream.html)
-- [Nova Sonic input events](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-input-events.html)
-- [Nova Sonic output events](https://docs.aws.amazon.com/nova/latest/nova2-userguide/sonic-output-events.html)
-- [Core Package](https://github.com/phpaisdk/core)
+- [PHP AI SDK documentation](https://phpaisdk.com/docs)
+- [Amazon Bedrock documentation](https://phpaisdk.com/docs/bedrock)
+
+## Community
+
+- [Contributing](https://github.com/phpaisdk/.github/blob/main/CONTRIBUTING.md)
+- [Support](https://github.com/phpaisdk/.github/blob/main/SUPPORT.md)
+- For private security reports, email [security@phpaisdk.com](mailto:security@phpaisdk.com).
