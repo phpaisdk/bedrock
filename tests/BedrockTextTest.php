@@ -37,7 +37,7 @@ it('generates text through the Bedrock Converse API with a bearer token', functi
 
     Bedrock::create(['apiKey' => 'bedrock-token', 'region' => 'us-east-1', 'api' => 'converse']);
 
-    $result = Generate::text('Hi')->model(Bedrock::model('anthropic.claude-3-5-sonnet-20240620-v1:0'))->run();
+    $result = Generate::text('Hi')->model(Bedrock::model('anthropic.claude-3-5-sonnet-20240620-v1:0'))->maxTokens(512)->run();
 
     expect($result->text)->toBe('Hello from Bedrock')
         ->and($result->usage->inputTokens)->toBe(9)
@@ -45,7 +45,7 @@ it('generates text through the Bedrock Converse API with a bearer token', functi
 
     $body = $client->sentBody();
     expect($body['messages'][0]['role'])->toBe('user')
-        ->and($body['inferenceConfig']['maxTokens'])->toBeInt();
+        ->and($body['inferenceConfig']['maxTokens'])->toBe(512);
 
     expect($client->lastRequest->getUri()->getPath())
         ->toBe('/model/anthropic.claude-3-5-sonnet-20240620-v1%3A0/converse')

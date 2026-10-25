@@ -14,6 +14,9 @@ use AiSdk\Tool;
 
 final class AnthropicMessagesCommandBuilder
 {
+    /** Anthropic models on Bedrock require max_tokens; applied only when the caller omits it. */
+    private const int DEFAULT_MAX_TOKENS = 4096;
+
     /**
      * @param  array<string, mixed>  $providerOptions
      * @return array<string, mixed>
@@ -23,7 +26,7 @@ final class AnthropicMessagesCommandBuilder
         $command = [
             'anthropic_version' => $providerOptions['anthropic_version'] ?? 'bedrock-2023-05-31',
             'messages' => self::messages($request),
-            'max_tokens' => $request->maxTokens,
+            'max_tokens' => $request->maxTokens ?? self::DEFAULT_MAX_TOKENS,
         ];
 
         $system = self::system($request);
@@ -32,7 +35,9 @@ final class AnthropicMessagesCommandBuilder
         }
 
         if ($request->reasoning === null) {
-            $command['temperature'] = $request->temperature;
+            if ($request->temperature !== null) {
+                $command['temperature'] = $request->temperature;
+            }
             if ($request->topP !== null) {
                 $command['top_p'] = $request->topP;
             }

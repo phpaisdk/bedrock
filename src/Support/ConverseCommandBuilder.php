@@ -17,11 +17,12 @@ final class ConverseCommandBuilder
     {
         $converted = ConvertsMessages::toConverseMessages($request->messages, $request->system);
 
-        $temperature = max(0.0, min(1.0, $request->temperature));
-
-        $inference = ['maxTokens' => $request->maxTokens];
-        if ($request->reasoning === null) {
-            $inference['temperature'] = $temperature;
+        $inference = [];
+        if ($request->maxTokens !== null) {
+            $inference['maxTokens'] = $request->maxTokens;
+        }
+        if ($request->reasoning === null && $request->temperature !== null) {
+            $inference['temperature'] = max(0.0, min(1.0, $request->temperature));
         }
         if ($request->topP !== null && $request->reasoning === null) {
             $inference['topP'] = $request->topP;
