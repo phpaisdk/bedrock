@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AiSdk\Bedrock\Aws;
 
+use AiSdk\Exceptions\InvalidResponseException;
+
 final class EventStreamDecoder
 {
     private string $buffer = '';
@@ -11,7 +13,7 @@ final class EventStreamDecoder
     public function __construct(private readonly int $maximumFrameBytes = 16_777_216)
     {
         if ($this->maximumFrameBytes < 16) {
-            throw new \InvalidArgumentException('The EventStream frame limit must be at least 16 bytes.');
+            throw new InvalidResponseException('The EventStream frame limit must be at least 16 bytes.');
         }
     }
 

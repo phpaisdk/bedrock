@@ -135,10 +135,10 @@ final class EventStream
     {
         $nameLength = strlen($name);
         if ($nameLength < 1 || $nameLength > 255) {
-            throw new \InvalidArgumentException('AWS EventStream header names must contain between 1 and 255 bytes.');
+            throw new InvalidResponseException('AWS EventStream header names must contain between 1 and 255 bytes.');
         }
         if ($type < 0 || $type > 255) {
-            throw new \InvalidArgumentException('AWS EventStream header types must contain between 0 and 255.');
+            throw new InvalidResponseException('AWS EventStream header types must contain between 0 and 255.');
         }
 
         $prefix = chr($nameLength) . $name . chr($type);
@@ -151,14 +151,14 @@ final class EventStream
             self::TYPE_LONG, self::TYPE_TIMESTAMP => self::uint64Be((int) $value),
             self::TYPE_BINARY, self::TYPE_STRING => self::lengthPrefixed((string) $value),
             self::TYPE_UUID => self::uuidBytes((string) $value),
-            default => throw new \InvalidArgumentException("Unsupported AWS EventStream header type [{$type}]."),
+            default => throw new InvalidResponseException("Unsupported AWS EventStream header type [{$type}]."),
         };
     }
 
     private static function lengthPrefixed(string $value): string
     {
         if (strlen($value) > 65_535) {
-            throw new \InvalidArgumentException('AWS EventStream string and binary headers cannot exceed 65535 bytes.');
+            throw new InvalidResponseException('AWS EventStream string and binary headers cannot exceed 65535 bytes.');
         }
 
         return pack('n', strlen($value)) . $value;
@@ -169,7 +169,7 @@ final class EventStream
         $hex = str_replace('-', '', $uuid);
         $bytes = hex2bin($hex);
         if ($bytes === false || strlen($bytes) !== 16) {
-            throw new \InvalidArgumentException('AWS EventStream UUID headers must contain a valid UUID.');
+            throw new InvalidResponseException('AWS EventStream UUID headers must contain a valid UUID.');
         }
 
         return $bytes;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AiSdk\Bedrock\Auth;
 
 use AiSdk\Bedrock\Aws\EventStream;
+use AiSdk\Exceptions\InvalidArgumentException;
 use DateTimeImmutable;
 use DateTimeZone;
 
@@ -37,7 +38,7 @@ final class StreamingSigV4Signer
         $shortDate = $date->format('Ymd');
         $parts = parse_url($url);
         if (! is_array($parts) || ! is_string($parts['host'] ?? null)) {
-            throw new \InvalidArgumentException('Cannot sign an invalid Bedrock Live URL.');
+            throw new InvalidArgumentException('Cannot sign an invalid Bedrock Live URL.');
         }
 
         $authority = $parts['host'];
