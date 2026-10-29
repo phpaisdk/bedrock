@@ -65,3 +65,7 @@ composer test:all  # all of the above
 - Package docs: https://phpaisdk.com/docs/bedrock.md
 - All documentation for agents: https://phpaisdk.com/llms.txt (full text: https://phpaisdk.com/llms-full.txt)
 - Core concepts (providers, models, tools, streaming): https://phpaisdk.com/docs/introduction.md
+
+## Changelog
+
+Keep `CHANGELOG.md` current: add short, user-facing entries (what users can do now, dependency compatibility) for every release. Release notes on GitHub should match.
