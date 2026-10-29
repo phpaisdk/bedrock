@@ -2,6 +2,10 @@
 
 Notable changes to `aisdk/bedrock`. Release notes are also published at https://github.com/phpaisdk/bedrock/releases.
 
+## Unreleased (v0.10.1)
+
+- Raise SDK exceptions instead of native PHP ones.
+
 ## v0.10.0 — 2026-10-29
 
 ### What's new
