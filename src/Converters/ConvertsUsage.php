@@ -22,10 +22,13 @@ final class ConvertsUsage
         $cacheRead = isset($usage['cacheReadInputTokens']) ? (int) $usage['cacheReadInputTokens'] : null;
         $cacheWrite = isset($usage['cacheWriteInputTokens']) ? (int) $usage['cacheWriteInputTokens'] : null;
 
+        $inclusiveInput = $input + ($cacheRead ?? 0) + ($cacheWrite ?? 0);
+
         return new Usage(
-            inputTokens: $input + ($cacheRead ?? 0) + ($cacheWrite ?? 0),
+            inputTokens: $inclusiveInput,
             outputTokens: $output,
-            totalTokens: isset($usage['totalTokens']) ? (int) $usage['totalTokens'] : null,
+            // AWS does not say whether totalTokens counts cache tokens; never report a total below its parts.
+            totalTokens: isset($usage['totalTokens']) ? max((int) $usage['totalTokens'], $inclusiveInput + $output) : null,
             reasoningTokens: null,
             cachedInputTokens: $cacheRead,
             cacheWriteInputTokens: $cacheWrite,
