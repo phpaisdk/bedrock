@@ -25,13 +25,15 @@ final class AnthropicMessagesStreamParser
     public static function parse(iterable $events): Generator
     {
         $usage = Usage::empty();
+        $usageData = [];
         $finishReason = FinishReason::Unknown;
 
         foreach ($events as $payload) {
             $type = $payload['type'] ?? null;
 
             if ($type === 'message_start' && isset($payload['message']['usage']) && is_array($payload['message']['usage'])) {
-                $usage = ConvertsUsage::fromAnthropic($payload['message']['usage']);
+                $usageData = $payload['message']['usage'];
+                $usage = ConvertsUsage::fromAnthropic($usageData);
             }
 
             if ($type === 'content_block_start' && ($payload['content_block']['type'] ?? null) === 'tool_use') {
@@ -57,7 +59,8 @@ final class AnthropicMessagesStreamParser
 
             if ($type === 'message_delta') {
                 if (isset($payload['usage']) && is_array($payload['usage'])) {
-                    $usage = ConvertsUsage::fromAnthropic($payload['usage']);
+                    $usageData = array_replace($usageData, $payload['usage']);
+                    $usage = ConvertsUsage::fromAnthropic($usageData);
                 }
                 if (isset($payload['delta']['stop_reason'])) {
                     $finishReason = MapsFinishReasons::fromAnthropic((string) $payload['delta']['stop_reason']);

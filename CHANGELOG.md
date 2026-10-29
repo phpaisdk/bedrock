@@ -2,6 +2,10 @@
 
 Notable changes to `aisdk/bedrock`. Release notes are also published at https://github.com/phpaisdk/bedrock/releases.
 
+## Unreleased (v0.10.2)
+
+- Include cache reads and writes in prompt usage, retain cache usage across Anthropic streaming events, and preserve provider totals.
+
 ## v0.10.1 — 2026-10-29
 
 - Raise SDK exceptions instead of native PHP ones.
